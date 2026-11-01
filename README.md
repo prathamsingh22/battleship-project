@@ -23,6 +23,6 @@ Future Plans:
 
 
 Tech Stack: 
-Language: Java
-Libraries/commands: ArrayList, Scanners, Server Socket and Socket
-Stored data: likely sits in ArrayList (if I build a scoreboard, it will be saved in a basic text document)
+- Language: Java
+- Libraries/commands: ArrayList, Scanners, Server Socket and Socket
+- Stored data: likely sits in ArrayList (if I build a scoreboard, it will be saved in a basic text document)
