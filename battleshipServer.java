@@ -8,12 +8,12 @@ import java.util.ArrayList;
 
 public class battleshipServer {
     public static final int DEFAULT_PORT = 12345;
-    public static final int MIN_CLIENTS = 2;
     public static final int MAX_CLIENTS = 2;
 
     private final int port;
     private final ArrayList<ClientHandler> clients = new ArrayList<>();
-    private volatile boolean sessionActive = false;
+    private final Board[] boards = {new Board(), new Board()};
+    private String phase = "WAITING"; // WAITING, PLACING, READY
 
     public battleshipServer(int port) {
         this.port = port;
@@ -21,141 +21,202 @@ public class battleshipServer {
 
     public void start() {
         System.out.println("Battleship Server starting on port " + port + "...");
-        System.out.println("Waiting for " + MIN_CLIENTS + " players to connect (min: "
-                + MIN_CLIENTS + ", max: " + MAX_CLIENTS + ").");
-
         try (ServerSocket serverSocket = new ServerSocket(port)) {
             while (true) {
-                Socket clientSocket = serverSocket.accept();
-                handleIncomingConnection(clientSocket);
+                handleConnection(serverSocket.accept());
             }
         } catch (IOException e) {
             System.err.println("Server error: " + e.getMessage());
         }
     }
 
-    private void handleIncomingConnection(Socket socket) {
-        ClientHandler handler = null;
-
+    private void handleConnection(Socket socket) {
+        ClientHandler handler;
         synchronized (clients) {
             if (clients.size() >= MAX_CLIENTS) {
                 rejectClient(socket);
                 return;
             }
 
-            int playerId = getNextAvailablePlayerId();
+            int playerId = isPlayerIdTaken(1) ? 2 : 1;
             try {
                 handler = new ClientHandler(socket, playerId, this);
-                clients.add(handler);
-                System.out.println("Player " + playerId + " connected (" + clients.size() + "/" + MAX_CLIENTS + ").");
-
-                if (clients.size() < MIN_CLIENTS) {
-                    sessionActive = false;
-                    handler.sendMessage("CONNECTED: You are Player " + playerId
-                            + ". Waiting for another player to join (" + clients.size() + "/" + MIN_CLIENTS + ")...");
-                } else {
-                    sessionActive = true;
-                    handler.sendMessage("CONNECTED: You are Player " + playerId + ".");
-                    broadcast("READY: Both players are connected (" + clients.size() + "/" + MAX_CLIENTS
-                            + "). Communication is now active! Type a message or 'quit' to exit.");
-                    System.out.println("Both players connected. Session is now active.");
-                }
             } catch (IOException e) {
-                System.err.println("Failed to initialize client handler: " + e.getMessage());
                 closeQuietly(socket);
                 return;
             }
-        }
 
-        Thread clientThread = new Thread(handler, "Player-" + handler.getPlayerId() + "-Thread");
-        clientThread.start();
-    }
+            clients.add(handler);
+            System.out.println("Player " + playerId + " connected (" + clients.size() + "/" + MAX_CLIENTS + ").");
+            handler.send("ASSIGN:" + playerId);
 
-    private int getNextAvailablePlayerId() {
-        boolean player1Taken = false;
-        for (ClientHandler client : clients) {
-            if (client.getPlayerId() == 1) {
-                player1Taken = true;
-                break;
+            if (clients.size() < MAX_CLIENTS) {
+                phase = "WAITING";
+                handler.send("PHASE:WAITING");
+                handler.send("MSG:Connected as Player " + playerId + ". Waiting for another player...");
+                sendBoards(handler);
+            } else {
+                startPlacementPhase();
             }
         }
-        return player1Taken ? 2 : 1;
+        new Thread(handler, "Player-" + handler.playerId).start();
     }
 
-    private void rejectClient(Socket socket) {
-        System.out.println("Rejected incoming connection from " + socket.getRemoteSocketAddress()
-                + " (server full: " + MAX_CLIENTS + "/" + MAX_CLIENTS + ").");
-        try (PrintWriter out = new PrintWriter(socket.getOutputStream(), true)) {
-            out.println("SERVER_FULL: Server already has the maximum of " + MAX_CLIENTS
-                    + " players connected. Connection rejected.");
-        } catch (IOException e) {
-            System.err.println("Error sending rejection message: " + e.getMessage());
-        } finally {
-            closeQuietly(socket);
+    private void startPlacementPhase() {
+        boards[0].reset();
+        boards[1].reset();
+        phase = "PLACING";
+        System.out.println("Both players connected. Starting ship placement.");
+
+        for (ClientHandler c : clients) {
+            c.send("PHASE:PLACING");
+            sendBoards(c);
+            sendNextShipPrompt(c);
         }
     }
 
-    public boolean isSessionActive() {
-        return sessionActive;
+    private void sendBoards(ClientHandler c) {
+        Board own = boards[c.playerId - 1];
+        Board opp = boards[c.playerId == 1 ? 1 : 0];
+        c.send("OWN_BOARD:" + own.serialize(true));
+        c.send("OPP_BOARD:" + opp.serialize(false));
     }
 
-    public void broadcast(String message) {
-        synchronized (clients) {
-            for (ClientHandler client : clients) {
-                client.sendMessage(message);
-            }
+    private void sendNextShipPrompt(ClientHandler c) {
+        int next = boards[c.playerId - 1].getNextShipIndex();
+        c.send("NEXT_SHIP:" + next);
+        if (next == -1) {
+            int other = (c.playerId == 1) ? 2 : 1;
+            c.send("MSG:All ships placed! Waiting for Player " + other + "...");
+        } else {
+            c.send("MSG:Place " + Board.SHIP_NAMES[next] + " (length " + Board.SHIP_LENGTHS[next]
+                    + ") - click a cell, right-click or Rotate to flip.");
         }
     }
 
-    public void handleClientMessage(ClientHandler sender, String message) {
+    public void handleCommand(ClientHandler player, String raw) {
         synchronized (clients) {
-            if (!sessionActive || clients.size() < MIN_CLIENTS) {
-                sender.sendMessage("WAIT: Cannot communicate yet. Waiting for " + MIN_CLIENTS
-                        + " players to be connected (" + clients.size() + "/" + MIN_CLIENTS + ").");
+            if (!"PLACING".equals(phase)) return;
+
+            String input = raw.trim();
+            String upper = input.toUpperCase();
+            Board board = boards[player.playerId - 1];
+
+            if (upper.equals("RESET")) {
+                board.reset();
+                System.out.println("Player " + player.playerId + " reset their board.");
+                sendBoards(player);
+                sendNextShipPrompt(player);
                 return;
             }
 
-            System.out.println("[Player " + sender.getPlayerId() + "]: " + message);
-            for (ClientHandler client : clients) {
-                if (client != sender) {
-                    client.sendMessage("[Player " + sender.getPlayerId() + "]: " + message);
+            if (upper.equals("AUTO")) {
+                if (!board.isPlacementComplete()) {
+                    board.placeRemainingRandomly();
+                    System.out.println("Player " + player.playerId + " auto-placed ships.");
+                    sendBoards(player);
+                    checkAllPlaced(player);
                 }
+                return;
             }
+
+            if (board.isPlacementComplete()) {
+                player.send("MSG:Already placed all ships. Waiting for opponent (or click Reset).");
+                return;
+            }
+
+            // Expected: PLACE <coord> <H|V>
+            String[] parts = input.split("\\s+");
+            if (parts.length != 3 || !parts[0].equalsIgnoreCase("PLACE")) {
+                player.send("MSG:Invalid command.");
+                return;
+            }
+
+            int[] coord = Board.parseCoordinate(parts[1]);
+            boolean horizontal = parts[2].equalsIgnoreCase("H");
+            if (coord == null || (!parts[2].equalsIgnoreCase("H") && !parts[2].equalsIgnoreCase("V"))) {
+                player.send("MSG:Invalid coordinate or orientation.");
+                return;
+            }
+
+            int next = board.getNextShipIndex();
+            String error = board.placeShip(next, coord[0], coord[1], horizontal);
+            if (error != null) {
+                player.send("MSG:Cannot place: " + error);
+                return;
+            }
+
+            System.out.println("Player " + player.playerId + " placed " + Board.SHIP_NAMES[next]
+                    + " at " + Board.formatCoordinate(coord[0], coord[1]) + " (" + (horizontal ? "H" : "V") + ").");
+            sendBoards(player);
+            checkAllPlaced(player);
+        }
+    }
+
+    private void checkAllPlaced(ClientHandler player) {
+        if (boards[0].isPlacementComplete() && boards[1].isPlacementComplete()) {
+            phase = "READY";
+            System.out.println("Both players finished placing ships. Ready for battle!");
+            for (ClientHandler c : clients) {
+                c.send("PHASE:READY");
+                c.send("NEXT_SHIP:-1");
+                sendBoards(c);
+                c.send("MSG:All ships placed! Both boards are locked. Player 1 goes first.");
+            }
+        } else {
+            sendNextShipPrompt(player);
         }
     }
 
     public void removeClient(ClientHandler client) {
         synchronized (clients) {
             if (clients.remove(client)) {
-                System.out.println("Player " + client.getPlayerId() + " disconnected ("
+                System.out.println("Player " + client.playerId + " disconnected ("
                         + clients.size() + "/" + MAX_CLIENTS + ").");
-                if (clients.size() < MIN_CLIENTS) {
-                    sessionActive = false;
-                    broadcast("NOTICE: Player " + client.getPlayerId()
-                            + " disconnected. Session paused until " + MIN_CLIENTS
-                            + " players are connected (" + clients.size() + "/" + MIN_CLIENTS + ").");
+                phase = "WAITING";
+                boards[0].reset();
+                boards[1].reset();
+                for (ClientHandler remaining : clients) {
+                    remaining.send("PHASE:WAITING");
+                    remaining.send("NEXT_SHIP:-1");
+                    sendBoards(remaining);
+                    remaining.send("MSG:Player " + client.playerId + " disconnected. Waiting for another player...");
                 }
             }
         }
     }
 
-    private static void closeQuietly(Socket socket) {
+    private boolean isPlayerIdTaken(int id) {
+        for (ClientHandler c : clients) {
+            if (c.playerId == id) return true;
+        }
+        return false;
+    }
+
+    private void rejectClient(Socket socket) {
+        try (PrintWriter out = new PrintWriter(socket.getOutputStream(), true)) {
+            out.println("SERVER_FULL:Server already has " + MAX_CLIENTS + " players.");
+        } catch (IOException ignored) {
+        } finally {
+            closeQuietly(socket);
+        }
+    }
+
+    private static void closeQuietly(Socket s) {
         try {
-            if (socket != null && !socket.isClosed()) {
-                socket.close();
-            }
+            if (s != null && !s.isClosed()) s.close();
         } catch (IOException ignored) {
         }
     }
 
     private static class ClientHandler implements Runnable {
-        private final Socket socket;
-        private final int playerId;
-        private final battleshipServer server;
-        private final BufferedReader in;
-        private final PrintWriter out;
+        final Socket socket;
+        final int playerId;
+        final battleshipServer server;
+        final BufferedReader in;
+        final PrintWriter out;
 
-        public ClientHandler(Socket socket, int playerId, battleshipServer server) throws IOException {
+        ClientHandler(Socket socket, int playerId, battleshipServer server) throws IOException {
             this.socket = socket;
             this.playerId = playerId;
             this.server = server;
@@ -163,12 +224,8 @@ public class battleshipServer {
             this.out = new PrintWriter(socket.getOutputStream(), true);
         }
 
-        public int getPlayerId() {
-            return playerId;
-        }
-
-        public void sendMessage(String message) {
-            out.println(message);
+        synchronized void send(String msg) {
+            out.println(msg);
         }
 
         @Override
@@ -176,14 +233,10 @@ public class battleshipServer {
             try {
                 String line;
                 while ((line = in.readLine()) != null) {
-                    if (line.equalsIgnoreCase("quit")) {
-                        sendMessage("DISCONNECTED: You have left the server.");
-                        break;
-                    }
-                    server.handleClientMessage(this, line);
+                    if (line.equalsIgnoreCase("QUIT")) break;
+                    server.handleCommand(this, line);
                 }
-            } catch (IOException e) {
-                System.out.println("Connection lost with Player " + playerId + ".");
+            } catch (IOException ignored) {
             } finally {
                 server.removeClient(this);
                 closeQuietly(socket);
@@ -192,15 +245,7 @@ public class battleshipServer {
     }
 
     public static void main(String[] args) {
-        int port = DEFAULT_PORT;
-        if (args.length > 0) {
-            try {
-                port = Integer.parseInt(args[0]);
-            } catch (NumberFormatException e) {
-                System.err.println("Invalid port argument. Using default port " + DEFAULT_PORT + ".");
-            }
-        }
-        battleshipServer server = new battleshipServer(port);
-        server.start();
+        int port = (args.length > 0) ? Integer.parseInt(args[0]) : DEFAULT_PORT;
+        new battleshipServer(port).start();
     }
 }
