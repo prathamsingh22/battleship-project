@@ -20,37 +20,29 @@ public class Board {
         final int startRow;
         final int startCol;
         final boolean horizontal;
-        final boolean[] hits;
+        int hits = 0;
 
         Ship(int typeIndex, int startRow, int startCol, boolean horizontal) {
             this.typeIndex = typeIndex;
             this.startRow = startRow;
             this.startCol = startCol;
             this.horizontal = horizontal;
-            this.hits = new boolean[SHIP_LENGTHS[typeIndex]];
         }
 
-        int segmentAt(int row, int col) {
-            int len = hits.length;
-            if (horizontal && row == startRow && col >= startCol && col < startCol + len) {
-                return col - startCol;
+        boolean occupies(int row, int col) {
+            int len = SHIP_LENGTHS[typeIndex];
+            if (horizontal) {
+                return row == startRow && col >= startCol && col < startCol + len;
             }
-            if (!horizontal && col == startCol && row >= startRow && row < startRow + len) {
-                return row - startRow;
-            }
-            return -1;
+            return col == startCol && row >= startRow && row < startRow + len;
         }
 
         boolean isSunk() {
-            for (boolean h : hits) {
-                if (!h) return false;
-            }
-            return true;
+            return hits >= SHIP_LENGTHS[typeIndex];
         }
     }
 
     private final char[][] grid = new char[SIZE][SIZE];
-    private final boolean[][] firedAt = new boolean[SIZE][SIZE];
     private final ArrayList<Ship> ships = new ArrayList<>();
 
     public Board() {
@@ -62,7 +54,6 @@ public class Board {
         for (int r = 0; r < SIZE; r++) {
             for (int c = 0; c < SIZE; c++) {
                 grid[r][c] = WATER;
-                firedAt[r][c] = false;
             }
         }
     }
@@ -98,11 +89,24 @@ public class Board {
     }
 
     public boolean allShipsSunk() {
-        if (ships.isEmpty()) return false;
+        return !ships.isEmpty() && getRemainingShipCount() == 0;
+    }
+
+    public String getShipNameAt(int row, int col) {
         for (Ship s : ships) {
-            if (!s.isSunk()) return false;
+            if (s.occupies(row, col)) {
+                return SHIP_NAMES[s.typeIndex];
+            }
         }
-        return true;
+        return null;
+    }
+
+    public int getRemainingShipCount() {
+        int count = 0;
+        for (Ship s : ships) {
+            if (!s.isSunk()) count++;
+        }
+        return count;
     }
 
     /** Returns null on success, or an error message if placement is invalid. */
@@ -144,13 +148,11 @@ public class Board {
 
     public ShotResult recordShot(int row, int col) {
         if (!isInBounds(row, col)) return ShotResult.INVALID;
-        if (firedAt[row][col]) return ShotResult.ALREADY_FIRED;
+        if (grid[row][col] == HIT || grid[row][col] == MISS) return ShotResult.ALREADY_FIRED;
 
-        firedAt[row][col] = true;
         for (Ship ship : ships) {
-            int seg = ship.segmentAt(row, col);
-            if (seg != -1) {
-                ship.hits[seg] = true;
+            if (ship.occupies(row, col)) {
+                ship.hits++;
                 grid[row][col] = HIT;
                 return ship.isSunk() ? ShotResult.SUNK : ShotResult.HIT;
             }

@@ -33,6 +33,7 @@ public class battleshipClient {
     private static final Color MISS_COLOR = new Color(180, 194, 208);
     private static final Color PREVIEW_OK = new Color(72, 188, 108);
     private static final Color PREVIEW_BAD = new Color(224, 76, 76);
+    private static final Color TARGET_HOVER = new Color(64, 146, 214);
 
     private final String host;
     private final int port;
@@ -44,13 +45,17 @@ public class battleshipClient {
     private JLabel statusLabel;
     private JButton[][] ownButtons = new JButton[Board.SIZE][Board.SIZE];
     private JButton[][] oppButtons = new JButton[Board.SIZE][Board.SIZE];
-    private JButton rotateButton, autoButton, resetButton;
+    private JButton rotateButton, autoButton, resetButton, surrenderButton;
 
     private char[][] ownCells = new char[Board.SIZE][Board.SIZE];
+    private char[][] oppCells = new char[Board.SIZE][Board.SIZE];
     private String phase = "WAITING";
+    private int myPlayerId = 0;
+    private int currentTurn = 0;
     private int nextShipIndex = -1;
     private boolean horizontal = true;
     private int hoverRow = -1, hoverCol = -1;
+    private int oppHoverRow = -1, oppHoverCol = -1;
 
     public battleshipClient(String host, int port) {
         this.host = host;
@@ -58,6 +63,7 @@ public class battleshipClient {
         for (int r = 0; r < Board.SIZE; r++) {
             for (int c = 0; c < Board.SIZE; c++) {
                 ownCells[r][c] = Board.WATER;
+                oppCells[r][c] = Board.WATER;
             }
         }
     }
@@ -95,15 +101,24 @@ public class battleshipClient {
         rotateButton = new JButton("Rotate: Horizontal");
         autoButton = new JButton("Auto-Place");
         resetButton = new JButton("Reset");
+        surrenderButton = new JButton("Surrender");
 
         rotateButton.addActionListener(e -> toggleOrientation());
         autoButton.addActionListener(e -> send("AUTO"));
         resetButton.addActionListener(e -> send("RESET"));
+        surrenderButton.addActionListener(e -> {
+            int choice = JOptionPane.showConfirmDialog(frame, "Are you sure you want to surrender?",
+                    "Surrender", JOptionPane.YES_NO_OPTION);
+            if (choice == JOptionPane.YES_OPTION) {
+                send("SURRENDER");
+            }
+        });
 
-        setPlacementControlsEnabled(false);
+        updateControlsForPhase();
         controls.add(rotateButton);
         controls.add(autoButton);
         controls.add(resetButton);
+        controls.add(surrenderButton);
         frame.add(controls, BorderLayout.SOUTH);
 
         frame.addWindowListener(new WindowAdapter() {
@@ -140,8 +155,8 @@ public class battleshipClient {
                 btn.setBackground(WATER_COLOR);
                 btn.setFocusPainted(false);
 
+                final int row = r, col = c;
                 if (isOwn) {
-                    final int row = r, col = c;
                     btn.addMouseListener(new MouseAdapter() {
                         @Override
                         public void mouseEntered(MouseEvent e) {
@@ -167,6 +182,30 @@ public class battleshipClient {
                             }
                         }
                     });
+                } else {
+                    btn.addMouseListener(new MouseAdapter() {
+                        @Override
+                        public void mouseEntered(MouseEvent e) {
+                            oppHoverRow = row;
+                            oppHoverCol = col;
+                            refreshOppBoardColors();
+                        }
+
+                        @Override
+                        public void mouseExited(MouseEvent e) {
+                            oppHoverRow = -1;
+                            oppHoverCol = -1;
+                            refreshOppBoardColors();
+                        }
+
+                        @Override
+                        public void mousePressed(MouseEvent e) {
+                            if (!"PLAYING".equals(phase)) return;
+                            if (SwingUtilities.isLeftMouseButton(e)) {
+                                send("FIRE " + Board.formatCoordinate(row, col));
+                            }
+                        }
+                    });
                 }
 
                 buttons[r][c] = btn;
@@ -184,18 +223,40 @@ public class battleshipClient {
         refreshOwnBoardColors();
     }
 
-    private void setPlacementControlsEnabled(boolean enabled) {
-        rotateButton.setEnabled(enabled);
-        autoButton.setEnabled(enabled);
-        resetButton.setEnabled(enabled);
+    private void updateControlsForPhase() {
+        boolean placing = "PLACING".equals(phase);
+        boolean playing = "PLAYING".equals(phase);
+        rotateButton.setEnabled(placing);
+        autoButton.setEnabled(placing);
+        resetButton.setEnabled(placing);
+        surrenderButton.setEnabled(playing);
+    }
+
+    private static void renderGrid(JButton[][] buttons, char[][] cells) {
+        for (int r = 0; r < Board.SIZE; r++) {
+            for (int c = 0; c < Board.SIZE; c++) {
+                styleCell(buttons[r][c], cells[r][c]);
+            }
+        }
+    }
+
+    private static void loadBoard(char[][] target, String payload) {
+        for (int i = 0; i < payload.length(); i++) {
+            target[i / Board.SIZE][i % Board.SIZE] = payload.charAt(i);
+        }
+    }
+
+    private void refreshOppBoardColors() {
+        renderGrid(oppButtons, oppCells);
+
+        if ("PLAYING".equals(phase) && currentTurn == myPlayerId
+                && oppHoverRow != -1 && oppCells[oppHoverRow][oppHoverCol] == Board.WATER) {
+            oppButtons[oppHoverRow][oppHoverCol].setBackground(TARGET_HOVER);
+        }
     }
 
     private void refreshOwnBoardColors() {
-        for (int r = 0; r < Board.SIZE; r++) {
-            for (int c = 0; c < Board.SIZE; c++) {
-                styleCell(ownButtons[r][c], ownCells[r][c]);
-            }
-        }
+        renderGrid(ownButtons, ownCells);
 
         if ("PLACING".equals(phase) && nextShipIndex != -1 && hoverRow != -1) {
             int len = Board.SHIP_LENGTHS[nextShipIndex];
@@ -265,27 +326,30 @@ public class battleshipClient {
 
         switch (type) {
             case "ASSIGN":
-                frame.setTitle("Battleship - Player " + payload);
+                myPlayerId = Integer.parseInt(payload);
+                frame.setTitle("Battleship - Player " + myPlayerId);
                 break;
             case "PHASE":
                 phase = payload;
-                setPlacementControlsEnabled("PLACING".equals(phase));
+                updateControlsForPhase();
                 refreshOwnBoardColors();
+                refreshOppBoardColors();
+                break;
+            case "TURN":
+                currentTurn = Integer.parseInt(payload);
+                refreshOppBoardColors();
                 break;
             case "NEXT_SHIP":
                 nextShipIndex = Integer.parseInt(payload);
                 refreshOwnBoardColors();
                 break;
             case "OWN_BOARD":
-                for (int i = 0; i < payload.length(); i++) {
-                    ownCells[i / Board.SIZE][i % Board.SIZE] = payload.charAt(i);
-                }
+                loadBoard(ownCells, payload);
                 refreshOwnBoardColors();
                 break;
             case "OPP_BOARD":
-                for (int i = 0; i < payload.length(); i++) {
-                    styleCell(oppButtons[i / Board.SIZE][i % Board.SIZE], payload.charAt(i));
-                }
+                loadBoard(oppCells, payload);
+                refreshOppBoardColors();
                 break;
             case "MSG":
                 statusLabel.setText(payload);

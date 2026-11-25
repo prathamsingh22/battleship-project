@@ -6,11 +6,10 @@ Playing Battleship with a friend on a computer requires keeping each player's bo
 
 ## How It Works
 The project has three Java files:
-- `battleshipServer.java` waits for two players to join, tracks both 10x10 boards, checks that ship placements are valid, and sends updates to both players.
+- `battleshipServer.java` waits for two players to join, tracks both 10x10 boards, validates ship placements and shots, enforces alternating turns, broadcasts board updates to both players, and detects win/surrender conditions.
 - `Board.java` stores each player's grid, ships, hits, and misses.
-- `battleshipClient.java` connects to the server and opens a Swing window showing your fleet on the left and your opponent's waters on the right. Players click cells to place ships, right-click (or use the Rotate button) to flip orientation, or use Auto-Place and Reset.
+- `battleshipClient.java` connects to the server and opens a Swing window showing your fleet on the left and your opponent's waters on the right. Players click cells to place ships (right-click or use **Rotate** to flip, or use **Auto-Place** and **Reset**), then click cells on the opponent's grid to fire during battle (or click **Surrender** to forfeit).
 
-Right now, connecting two players and placing ships simultaneously are working. Taking turns to fire shots and checking for a winner are next.
 
 ![System Flowchart](FlowChart%20CS193%20Battleship%20Project.drawio.png)
 
@@ -40,10 +39,10 @@ Make sure you have **Git** and **Java (JDK 17+)** installed.
    java battleshipClient
    ```
 
-Once both windows open, hover over **YOUR FLEET** and left-click to place each ship (green = valid, red = invalid). Right-click or click **Rotate** to switch between horizontal and vertical, or click **Auto-Place** to place your remaining ships randomly.
+Once both windows open, hover over **YOUR FLEET** and left-click to place each ship (green = valid, red = invalid). Right-click or click **Rotate** to switch between horizontal and vertical, or click **Auto-Place** to place your remaining ships randomly. Once both players finish placing their ships, battle starts with Player 1 going first—left-click cells on **OPPONENT'S WATERS** on your turn to fire (or click **Surrender** to forfeit). When the game ends, both boards are revealed.
 
 ### Example Run
-When two players connect and place their ships, the server terminal logs:
+When two players connect, place ships, and play a turn, the server terminal logs:
 ```text
 Battleship Server starting on port 12345...
 Player 1 connected (1/2).
@@ -52,12 +51,14 @@ Both players connected. Starting ship placement.
 Player 1 placed Carrier at A1 (H).
 Player 2 auto-placed ships.
 Player 1 auto-placed ships.
-Both players finished placing ships. Ready for battle!
+Both players finished placing ships. Battle started! Player 1 goes first.
+Player 1 fired at B4: HIT.
+Player 2 fired at E7: MISS.
 ```
 
-For example, when Player 1 clicks cell `A1` while placing their Carrier horizontally:
-- **Input (Player 1 clicks A1):** Client sends `PLACE A1 H` to the server.
-- **Output (Server response):** Server validates the spot, updates Player 1's board with the Carrier at `A1`–`A5`, and prompts Player 1 to place their Battleship next.
+For example:
+- **Placing a ship (Player 1 clicks A1):** Client sends `PLACE A1 H` to the server. The server validates the spot, updates Player 1's board with the Carrier at `A1`–`A5`, and prompts for the next ship.
+- **Firing a shot (Player 1 clicks B4):** Client sends `FIRE B4` to the server. The server checks that it is Player 1's turn and that `B4` has not been fired at yet, updates both players' boards (`X` for hit, `O` for miss), switches to Player 2's turn, or ends the game if all enemy ships are sunk.
 
 ## Roadmap
 
@@ -66,14 +67,14 @@ For example, when Player 1 clicks cell `A1` while placing their Carrier horizont
 - [x] Create client and server communication with max and min of two clients
 - [x] Setup board tracking for both players in the server
 - [x] Setup initial boat placements for both players before game starts (can happen at the same time)
-- [ ] Setup showing the correct board for both players with updates for both players after each turn
-- [ ] Setup different inputs they can each perform
-- [ ] Create win conditions to end game
-- [ ] Create turn enforcement and input checks to disallow bad inputs
+- [x] Setup showing the correct board for both players with updates for both players after each turn
+- [x] Setup different inputs they can each perform
+- [x] Create win conditions to end game
+- [x] Create turn enforcement and input checks to disallow bad inputs
 
 ### Future Plans
 - [ ] Handle client disconnect mid-game
 - [ ] AI as a third client for solo playing
-- [x] Visual icons for ships and color coded hits and misses
+- [ ] Visual icons for ships and color coded hits and misses
 - [ ] Reset game after win instead of killing the server
 - [ ] Scoreboard
