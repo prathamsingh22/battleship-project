@@ -47,7 +47,7 @@ public class battleshipClient {
     private JLabel statusLabel;
     private JButton[][] ownButtons = new JButton[Board.SIZE][Board.SIZE];
     private JButton[][] oppButtons = new JButton[Board.SIZE][Board.SIZE];
-    private JButton rotateButton, autoButton, resetButton, surrenderButton;
+    private JButton rotateButton, autoButton, resetButton, surrenderButton, playAgainButton;
 
     private char[][] ownCells = new char[Board.SIZE][Board.SIZE];
     private char[][] oppCells = new char[Board.SIZE][Board.SIZE];
@@ -104,6 +104,7 @@ public class battleshipClient {
         autoButton = new JButton("Auto-Place");
         resetButton = new JButton("Reset");
         surrenderButton = new JButton("Surrender");
+        playAgainButton = new JButton("Play Again");
 
         rotateButton.addActionListener(e -> toggleOrientation());
         autoButton.addActionListener(e -> send("AUTO"));
@@ -115,12 +116,19 @@ public class battleshipClient {
                 send("SURRENDER");
             }
         });
+        playAgainButton.addActionListener(e -> {
+            if ("GAME_OVER".equals(phase)) {
+                playAgainButton.setEnabled(false);
+                send("REMATCH");
+            }
+        });
 
         updateControlsForPhase();
         controls.add(rotateButton);
         controls.add(autoButton);
         controls.add(resetButton);
         controls.add(surrenderButton);
+        controls.add(playAgainButton);
         frame.add(controls, BorderLayout.SOUTH);
 
         frame.addWindowListener(new WindowAdapter() {
@@ -234,6 +242,7 @@ public class battleshipClient {
         autoButton.setEnabled(canPlaceMore);
         resetButton.setEnabled(placing);
         surrenderButton.setEnabled(playing);
+        playAgainButton.setEnabled("GAME_OVER".equals(phase));
     }
 
     private static void renderGrid(JButton[][] buttons, char[][] cells) {
