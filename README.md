@@ -76,5 +76,5 @@ For example:
 - [x] Handle client disconnect mid-game
 - [ ] AI as a third client for solo playing
 - [ ] Visual icons for ships and color coded hits and misses
-- [ ] Reset game after win instead of being stuck on win screen
+- [x] Reset game after win instead of being stuck on win screen
 - [ ] Scoreboard

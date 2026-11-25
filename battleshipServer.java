@@ -13,6 +13,7 @@ public class battleshipServer {
     private final int port;
     private final ArrayList<ClientHandler> clients = new ArrayList<>();
     private final Board[] boards = {new Board(), new Board()};
+    private final boolean[] rematchReady = {false, false};
     private String phase = "WAITING";
     private int currentTurn = 1;
 
@@ -66,9 +67,11 @@ public class battleshipServer {
     private void startPlacementPhase() {
         boards[0].reset();
         boards[1].reset();
+        rematchReady[0] = false;
+        rematchReady[1] = false;
         phase = "PLACING";
         currentTurn = 1;
-        System.out.println("Both players connected. Starting ship placement.");
+        System.out.println("Starting ship placement.");
 
         broadcast("PHASE:PLACING");
         broadcast("TURN:0");
@@ -129,7 +132,7 @@ public class battleshipServer {
                     handleBattleCommand(player, input);
                     break;
                 case "GAME_OVER":
-                    player.send("MSG:Game is over. No more moves allowed.");
+                    handleGameOverCommand(player, input);
                     break;
                 default:
                     player.send("MSG:Waiting for another player to join...");
@@ -283,9 +286,37 @@ public class battleshipServer {
         }
     }
 
+    private void handleGameOverCommand(ClientHandler player, String input) {
+        if (!input.equalsIgnoreCase("REMATCH")) {
+            player.send("MSG:Game is over. Click Play Again for a rematch.");
+            return;
+        }
+
+        int idx = player.playerId - 1;
+        if (rematchReady[idx]) return;
+        rematchReady[idx] = true;
+
+        int opponentId = otherPlayer(player.playerId);
+        if (rematchReady[0] && rematchReady[1]) {
+            System.out.println("Both players ready for rematch. Starting new game.");
+            startPlacementPhase();
+        } else {
+            System.out.println("Player " + player.playerId + " requested a rematch.");
+            for (ClientHandler c : clients) {
+                if (c.playerId == player.playerId) {
+                    c.send("MSG:Waiting for Player " + opponentId + " to click Play Again...");
+                } else {
+                    c.send("MSG:Player " + player.playerId + " wants a rematch! Click Play Again to start.");
+                }
+            }
+        }
+    }
+
     private void endGame(int winnerId, String message) {
         phase = "GAME_OVER";
         currentTurn = 0;
+        rematchReady[0] = false;
+        rematchReady[1] = false;
         System.out.println("Game over (Winner: Player " + winnerId + "): " + message);
         broadcastBoards(true);
         broadcast("PHASE:GAME_OVER");
@@ -300,6 +331,8 @@ public class battleshipServer {
                         + clients.size() + "/" + MAX_CLIENTS + ").");
                 phase = "WAITING";
                 currentTurn = 1;
+                rematchReady[0] = false;
+                rematchReady[1] = false;
                 boards[0].reset();
                 boards[1].reset();
                 for (ClientHandler remaining : clients) {
