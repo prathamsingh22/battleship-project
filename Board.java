@@ -67,12 +67,12 @@ public class Board {
         String s = token.trim().toUpperCase();
         if (s.length() < 2 || s.length() > 3) return null;
         int row = s.charAt(0) - 'A';
-        int col;
-        try {
-            col = Integer.parseInt(s.substring(1)) - 1;
-        } catch (NumberFormatException e) {
-            return null;
+        String colPart = s.substring(1);
+        if (colPart.charAt(0) == '0') return null;
+        for (int i = 0; i < colPart.length(); i++) {
+            if (!Character.isDigit(colPart.charAt(i))) return null;
         }
+        int col = Integer.parseInt(colPart) - 1;
         return isInBounds(row, col) ? new int[]{row, col} : null;
     }
 
@@ -111,6 +111,9 @@ public class Board {
 
     /** Returns null on success, or an error message if placement is invalid. */
     public String placeShip(int typeIndex, int startRow, int startCol, boolean horizontal) {
+        if (typeIndex < 0 || typeIndex >= SHIP_LENGTHS.length) {
+            return "Invalid ship type.";
+        }
         int len = SHIP_LENGTHS[typeIndex];
         for (int i = 0; i < len; i++) {
             int r = horizontal ? startRow : startRow + i;

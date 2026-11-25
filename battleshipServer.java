@@ -360,7 +360,7 @@ public class battleshipServer {
             try {
                 String line;
                 while ((line = in.readLine()) != null) {
-                    if (line.equalsIgnoreCase("QUIT")) break;
+                    if (line.trim().equalsIgnoreCase("QUIT")) break;
                     server.handleCommand(this, line);
                 }
             } catch (IOException ignored) {

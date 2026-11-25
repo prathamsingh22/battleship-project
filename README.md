@@ -73,8 +73,8 @@ For example:
 - [x] Create turn enforcement and input checks to disallow bad inputs
 
 ### Future Plans
-- [ ] Handle client disconnect mid-game
+- [x] Handle client disconnect mid-game
 - [ ] AI as a third client for solo playing
 - [ ] Visual icons for ships and color coded hits and misses
-- [ ] Reset game after win instead of killing the server
+- [ ] Reset game after win instead of being stuck on win screen
 - [ ] Scoreboard

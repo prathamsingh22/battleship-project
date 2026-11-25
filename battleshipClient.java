@@ -13,6 +13,7 @@ import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.GridLayout;
+import java.awt.Insets;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
@@ -40,6 +41,7 @@ public class battleshipClient {
 
     private Socket socket;
     private PrintWriter out;
+    private volatile boolean closing = false;
 
     private JFrame frame;
     private JLabel statusLabel;
@@ -109,7 +111,7 @@ public class battleshipClient {
         surrenderButton.addActionListener(e -> {
             int choice = JOptionPane.showConfirmDialog(frame, "Are you sure you want to surrender?",
                     "Surrender", JOptionPane.YES_NO_OPTION);
-            if (choice == JOptionPane.YES_OPTION) {
+            if (choice == JOptionPane.YES_OPTION && "PLAYING".equals(phase)) {
                 send("SURRENDER");
             }
         });
@@ -150,6 +152,7 @@ public class battleshipClient {
             for (int c = 0; c < Board.SIZE; c++) {
                 JButton btn = new JButton();
                 btn.setPreferredSize(new Dimension(34, 34));
+                btn.setMargin(new Insets(0, 0, 0, 0));
                 btn.setFont(new Font("SansSerif", Font.BOLD, 12));
                 btn.setForeground(Color.WHITE);
                 btn.setBackground(WATER_COLOR);
@@ -225,9 +228,10 @@ public class battleshipClient {
 
     private void updateControlsForPhase() {
         boolean placing = "PLACING".equals(phase);
+        boolean canPlaceMore = placing && nextShipIndex != -1;
         boolean playing = "PLAYING".equals(phase);
-        rotateButton.setEnabled(placing);
-        autoButton.setEnabled(placing);
+        rotateButton.setEnabled(canPlaceMore);
+        autoButton.setEnabled(canPlaceMore);
         resetButton.setEnabled(placing);
         surrenderButton.setEnabled(playing);
     }
@@ -241,7 +245,8 @@ public class battleshipClient {
     }
 
     private static void loadBoard(char[][] target, String payload) {
-        for (int i = 0; i < payload.length(); i++) {
+        int limit = Math.min(payload.length(), Board.SIZE * Board.SIZE);
+        for (int i = 0; i < limit; i++) {
             target[i / Board.SIZE][i % Board.SIZE] = payload.charAt(i);
         }
     }
@@ -297,22 +302,40 @@ public class battleshipClient {
     }
 
     private void connectAndListen() {
+        boolean serverFull = false;
         try {
             socket = new Socket(host, port);
             BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-            out = new PrintWriter(socket.getOutputStream(), true);
+            synchronized (this) {
+                if (closing) {
+                    closeSocketQuietly();
+                    return;
+                }
+                out = new PrintWriter(socket.getOutputStream(), true);
+            }
 
             String line;
             while ((line = in.readLine()) != null) {
                 final String msg = line;
+                if (line.startsWith("SERVER_FULL:")) {
+                    serverFull = true;
+                }
                 SwingUtilities.invokeLater(() -> handleServerMessage(msg));
-                if (line.startsWith("SERVER_FULL:")) break;
+                if (serverFull) break;
+            }
+            if (!closing && !serverFull) {
+                SwingUtilities.invokeLater(() -> {
+                    JOptionPane.showMessageDialog(frame, "Disconnected from server.");
+                    frame.dispose();
+                });
             }
         } catch (IOException e) {
-            SwingUtilities.invokeLater(() -> {
-                JOptionPane.showMessageDialog(frame, "Connection error: " + e.getMessage());
-                frame.dispose();
-            });
+            if (!closing) {
+                SwingUtilities.invokeLater(() -> {
+                    JOptionPane.showMessageDialog(frame, "Connection error: " + e.getMessage());
+                    frame.dispose();
+                });
+            }
         } finally {
             disconnect();
         }
@@ -341,6 +364,7 @@ public class battleshipClient {
                 break;
             case "NEXT_SHIP":
                 nextShipIndex = Integer.parseInt(payload);
+                updateControlsForPhase();
                 refreshOwnBoardColors();
                 break;
             case "OWN_BOARD":
@@ -361,15 +385,20 @@ public class battleshipClient {
         }
     }
 
-    private void send(String cmd) {
+    private synchronized void send(String cmd) {
         if (out != null) out.println(cmd);
     }
 
-    private void disconnect() {
+    private synchronized void disconnect() {
+        closing = true;
         if (out != null) {
             out.println("QUIT");
             out = null;
         }
+        closeSocketQuietly();
+    }
+
+    private void closeSocketQuietly() {
         try {
             if (socket != null && !socket.isClosed()) socket.close();
         } catch (IOException ignored) {
